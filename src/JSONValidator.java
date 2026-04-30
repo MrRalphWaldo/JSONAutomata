@@ -53,7 +53,7 @@ public class JSONValidator {
             }
 
             String resultStatus = result.isValid ? "✓ VALID" : "✗ INVALID";
-            String inputDisplay = tc.input.length() > 50 ? tc.input.substring(0, 47) + "..." : tc.input;
+            String inputDisplay = tc.input;
 
             // Show test case header
             System.out.printf("%-3d %-50s %s\n", tc.id, inputDisplay, resultStatus);
@@ -61,8 +61,11 @@ public class JSONValidator {
             // Show PDA execution trace
             if (!result.instructions.isEmpty()) {
                 System.out.println("    PDA Trace:");
-                int stepCount = 0;
+                //int stepCount = 0;
                 for (Instruction instr : result.instructions) {
+                    System.out.printf("      %s\n", instr);
+
+                    /**
                     if (stepCount < 5) {  // Show first 5 steps
                         System.out.printf("      %s\n", instr);
                     } else if (stepCount == 5) {
@@ -71,6 +74,7 @@ public class JSONValidator {
                         break;
                     }
                     stepCount++;
+                     */
                 }
             }
             System.out.println();
@@ -80,7 +84,7 @@ public class JSONValidator {
         System.out.printf("Total Tests: %d\n", testCases.length);
         System.out.printf("Valid JSON: %d\n", validCount);
         System.out.printf("Invalid JSON: %d\n\n", invalidCount);
-        
+
     }
 
     /**

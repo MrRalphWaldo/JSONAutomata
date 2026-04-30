@@ -231,7 +231,7 @@ public class Lexer {
     private void advance() {
         if (position < input.length()) {
             if (input.charAt(position) == '\n') {
-                line++;
+
                 column = 1;
             } else {
                 column++;
