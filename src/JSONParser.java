@@ -51,42 +51,28 @@ public class JSONParser {
      */
     public boolean parse(String input) {
         try {
-            // Lexical analysis: tokenize the input
             Lexer lexer = new Lexer(input);
             this.tokens = lexer.tokenize();
+            if (verbose) System.out.println("Tokens: " + tokens);
 
-            if (verbose) {
-                System.out.println("Tokens: " + tokens);
-            }
-
-            // Syntactic analysis: validate token sequence using PDA
             this.instructions.clear();
             this.currentState = Q_START;
 
-            // Enter value parsing and execute PDA
+            // Instead of recording a fake SCAN, we start with the start symbol on the stack.
+            // In a PDA we would WRITE the start symbol, then READ it.
+            // But here we directly call parseValue, which will record READ("VALUE").
+            // We also need an initial push of the start symbol onto the stack.
             recordInstruction(Instruction.Operation.WRITE, "VALUE", Q_VALUE_ENTRY);
             boolean result = parseValue(Q_ACCEPT);
 
-            // After parsing the value, we should be at EOF
-            if (result && tokens.current() != Token.EOF) {
-                return false;
-            }
+            if (result && tokens.current() != Token.EOF) return false;
 
-            // Record final ACCEPT instruction
             if (result) {
                 recordInstruction(Instruction.Operation.SCAN, "EOF", Q_ACCEPT);
             }
-
             return result;
-        } catch (JsonLexerException e) {
-            if (verbose) {
-                System.err.println("Lexer error: " + e.getMessage());
-            }
-            return false;
         } catch (Exception e) {
-            if (verbose) {
-                System.err.println("Parser error: " + e.getMessage());
-            }
+            if (verbose) System.err.println("Error: " + e.getMessage());
             return false;
         }
     }
@@ -127,34 +113,37 @@ public class JSONParser {
     // ========== Grammar productions ==========
 
     private boolean parseValue(String nextStateAfterValue) {
-        // Enter value decision
+        // Pop the nonterminal VALUE from the stack
         recordInstruction(Instruction.Operation.READ, "VALUE", Q_VALUE_DECISION);
 
         switch (tokens.current()) {
             case LBRACE:
+                // Production: VALUE → OBJECT
+                // Push the right-hand side in reverse order: nothing to push for OBJECT (will be handled in parseObject)
                 recordInstruction(Instruction.Operation.WRITE, "OBJECT", Q_OBJECT_OPEN);
                 return parseObject(nextStateAfterValue);
             case LBRACKET:
                 recordInstruction(Instruction.Operation.WRITE, "ARRAY", Q_ARRAY_OPEN);
                 return parseArray(nextStateAfterValue);
             case STRING:
-                recordInstruction(Instruction.Operation.WRITE, "STRING", nextStateAfterValue);
+                // Terminal: just SCAN it, no WRITE needed
+                recordInstruction(Instruction.Operation.SCAN, "STRING", nextStateAfterValue);
                 tokens.advance();
                 return true;
             case NUMBER:
-                recordInstruction(Instruction.Operation.WRITE, "NUMBER", nextStateAfterValue);
+                recordInstruction(Instruction.Operation.SCAN, "NUMBER", nextStateAfterValue);
                 tokens.advance();
                 return true;
             case TRUE:
-                recordInstruction(Instruction.Operation.WRITE, "TRUE", nextStateAfterValue);
+                recordInstruction(Instruction.Operation.SCAN, "TRUE", nextStateAfterValue);
                 tokens.advance();
                 return true;
             case FALSE:
-                recordInstruction(Instruction.Operation.WRITE, "FALSE", nextStateAfterValue);
+                recordInstruction(Instruction.Operation.SCAN, "FALSE", nextStateAfterValue);
                 tokens.advance();
                 return true;
             case NULL:
-                recordInstruction(Instruction.Operation.WRITE, "NULL", nextStateAfterValue);
+                recordInstruction(Instruction.Operation.SCAN, "NULL", nextStateAfterValue);
                 tokens.advance();
                 return true;
             default:
@@ -229,48 +218,53 @@ public class JSONParser {
     }
 
     private boolean parseArray(String nextStateAfterArray) {
+        // We already pushed ARRAY in parseValue, now we expand it
+        // Production: ARRAY → '[' ELEMENTS ']'
+        // Reverse push: ']' , ELEMENTS , '['   (but we'll handle '[' separately)
+        recordInstruction(Instruction.Operation.WRITE, "RBRACKET", Q_ARRAY_OPEN);
+        recordInstruction(Instruction.Operation.WRITE, "ELEMENTS", Q_ARRAY_OPEN);
         recordInstruction(Instruction.Operation.WRITE, "LBRACKET", Q_ARRAY_OPEN);
-        if (!consume(Token.LBRACKET, "Expected '['", Q_ARRAY_ELEMENTS)) {
-            return false;
-        }
 
-        if (tokens.current() == Token.RBRACKET) {
-            // Empty array: []
-            recordInstruction(Instruction.Operation.WRITE, "RBRACKET", Q_ARRAY_CLOSE);
-            tokens.advance();
-            recordInstruction(Instruction.Operation.READ, "ARRAY", nextStateAfterArray);
-            return true;
-        }
+        // Now the top of stack is LBRACKET – match it
+        if (!consume(Token.LBRACKET, "Expected '['", Q_ARRAY_ELEMENTS)) return false;
 
-        // Non-empty array: [ elements ]
-        if (!parseElements(Q_ARRAY_CLOSE)) {
-            return false;
-        }
+        // Now top is ELEMENTS – expand it
+        if (!parseElements(Q_ARRAY_CLOSE)) return false;
 
-        recordInstruction(Instruction.Operation.WRITE, "RBRACKET", Q_ARRAY_CLOSE);
-        if (!consume(Token.RBRACKET, "Expected ']'", Q_ARRAY_CLOSE)) {
-            return false;
-        }
+        // After ELEMENTS is expanded, top becomes RBRACKET – match it
+        if (!consume(Token.RBRACKET, "Expected ']'", Q_ARRAY_CLOSE)) return false;
 
+        // Finally pop the ARRAY nonterminal
         recordInstruction(Instruction.Operation.READ, "ARRAY", nextStateAfterArray);
         return true;
     }
 
     private boolean parseElements(String nextStateAfterElements) {
-        recordInstruction(Instruction.Operation.WRITE, "ELEMENTS", Q_VALUE_ENTRY);
-        if (!parseValue(Q_ARRAY_ELEMENTS)) {
-            return false;
-        }
+        // Production: ELEMENTS → VALUE ( ',' VALUE )*
+        // We'll implement it recursively in the trace.
+        // First expand to VALUE and then handle star.
+        recordInstruction(Instruction.Operation.WRITE, "ELEMENTS_TAIL", Q_VALUE_ENTRY);
+        recordInstruction(Instruction.Operation.WRITE, "VALUE", Q_VALUE_ENTRY);
+        // Now top is VALUE – parse it
+        if (!parseValue(Q_ARRAY_ELEMENTS)) return false;
 
-        while (tokens.current() == Token.COMMA) {
+        // Now top is ELEMENTS_TAIL
+        if (!parseElementsTail(nextStateAfterElements)) return false;
+
+        return true;
+    }
+
+    private boolean parseElementsTail(String nextState) {
+        // ELEMENTS_TAIL → ',' VALUE ELEMENTS_TAIL | ε
+        if (tokens.current() == Token.COMMA) {
             recordInstruction(Instruction.Operation.SCAN, "COMMA", Q_VALUE_ENTRY);
             tokens.advance();
-            if (!parseValue(Q_ARRAY_ELEMENTS)) {
-                return false;
-            }
+            recordInstruction(Instruction.Operation.WRITE, "ELEMENTS_TAIL", Q_VALUE_ENTRY);
+            recordInstruction(Instruction.Operation.WRITE, "VALUE", Q_VALUE_ENTRY);
+            if (!parseValue(Q_ARRAY_ELEMENTS)) return false;
+            if (!parseElementsTail(nextState)) return false;
         }
-
-        recordInstruction(Instruction.Operation.READ, "ELEMENTS", nextStateAfterElements);
+        // ε production: do nothing
         return true;
     }
 
