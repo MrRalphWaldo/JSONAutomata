@@ -1,82 +1,82 @@
 import java.util.*;
 
-/**
- * JSONValidator - Main entry point for the JSON validation system.
- * Uses a Lexer (DFA) followed by a JSONParser (PDA) to validate JSON input.
- */
 public class JSONValidator {
     public static void main(String[] args) {
         System.out.println("=== JSON Validator (Pushdown Automaton) ===\n");
-
-        // Run test suite
         runTestSuite();
     }
 
     /**
-     * Validate a single JSON string and return PDA instruction trace.
+     * Validate a single JSON string.
+     * @param verbose if true, prints token stream and PDA trace
      */
-    public static ValidationResult validate(String jsonInput) {
+    public static ValidationResult validate(String jsonInput, boolean verbose) {
         try {
+            Lexer lexer = new Lexer(jsonInput);
+            TokenStream tokenStream = lexer.tokenize();
+
+            if (verbose) {
+                System.out.println("    Tokens: " + tokenStream);
+            }
+
             JSONParser parser = new JSONParser(false);
             boolean isValid = parser.parse(jsonInput);
-
-            // Get the instruction trace showing PDA execution
             List<Instruction> instructions = parser.getInstructionTrace();
 
-            return new ValidationResult(isValid, isValid ? "VALID" : "INVALID", instructions);
+            // Determine final state from last instruction (if any)
+            String finalState = getFinalState(instructions);
+
+            // Acceptance requires: parser says valid AND at EOF
+            // We also need to check EOF because parser returns false if extra tokens
+            // But parse() already does that, so isValid already reflects that.
+            // However we also need to handle the case where parser returned true but no SCAN(EOF) recorded?
+            // parse() records SCAN(EOF) only when result true, so that's fine.
+            // We'll just use isValid.
+            boolean accepted = isValid;
+
+            return new ValidationResult(isValid, accepted, finalState, instructions);
+        } catch (JsonLexerException e) {
+            return new ValidationResult(false, false, "lexer_error", new ArrayList<>());
         } catch (Exception e) {
-            return new ValidationResult(false, "INVALID: " + e.getMessage(), new ArrayList<>());
+            return new ValidationResult(false, false, "exception", new ArrayList<>());
         }
     }
 
+    private static String getFinalState(List<Instruction> instructions) {
+        if (instructions.isEmpty()) return "none";
+        return instructions.get(instructions.size() - 1).getNextState();
+    }
 
-    /**
-     * Run comprehensive test suite.
-     * Shows the PDA execution trace for each test case.
-     */
     public static void runTestSuite() {
         TestCase[] testCases = getTestCases();
 
         System.out.printf("%-3s %-50s %s\n", "ID", "Input JSON", "Result");
         System.out.println("=".repeat(80));
 
-        int validCount = 0;
-        int invalidCount = 0;
+        int validCount = 0, invalidCount = 0;
 
         for (TestCase tc : testCases) {
-            ValidationResult result = validate(tc.input);
+            ValidationResult result = validate(tc.input, true);
+            if (result.isValid) validCount++;
+            else invalidCount++;
 
-            if (result.isValid) {
-                validCount++;
-            } else {
-                invalidCount++;
-            }
-
+            String inputDisplay = tc.input.length() > 48 ? tc.input.substring(0, 45) + "..." : tc.input;
             String resultStatus = result.isValid ? "✓ VALID" : "✗ INVALID";
-            String inputDisplay = tc.input;
-
-            // Show test case header
             System.out.printf("%-3d %-50s %s\n", tc.id, inputDisplay, resultStatus);
 
-            // Show PDA execution trace
+            // Show PDA trace (if any)
             if (!result.instructions.isEmpty()) {
                 System.out.println("    PDA Trace:");
-                //int stepCount = 0;
                 for (Instruction instr : result.instructions) {
                     System.out.printf("      %s\n", instr);
-
-                    /**
-                    if (stepCount < 5) {  // Show first 5 steps
-                        System.out.printf("      %s\n", instr);
-                    } else if (stepCount == 5) {
-                        int remaining = result.instructions.size() - 5;
-                        System.out.printf("      ... and %d more steps\n", remaining);
-                        break;
-                    }
-                    stepCount++;
-                     */
                 }
+            } else if (!result.isValid) {
+                System.out.println("    PDA Trace: (no instructions – error before parsing)");
             }
+
+            // Show final state and acceptance decision
+            System.out.printf("    Final state: %s\n", result.finalState);
+            System.out.printf("    Accept? %s\n", result.accepted ? "Yes" : "No");
             System.out.println();
         }
 
@@ -84,16 +84,12 @@ public class JSONValidator {
         System.out.printf("Total Tests: %d\n", testCases.length);
         System.out.printf("Valid JSON: %d\n", validCount);
         System.out.printf("Invalid JSON: %d\n\n", invalidCount);
-
     }
 
-    /**
-     * Test cases for JSON validation.
-     * NO EXPECTED RESULTS - We test to see what the validator outputs.
-     */
     private static TestCase[] getTestCases() {
+        // Keep your existing test cases exactly as before
         return new TestCase[]{
-                // Primitives
+                new TestCase(1, "null"), new TestCase(2, "true"), // ... etc ...
                 new TestCase(1, "null"),
                 new TestCase(2, "true"),
                 new TestCase(3, "false"),
@@ -205,35 +201,15 @@ public class JSONValidator {
         };
     }
 
-    /**
-     * Test case structure.
-     * NO EXPECTED RESULT - We discover what the validator outputs.
-     */
-    static class TestCase {
-        int id;
-        String input;
+    static class TestCase { int id; String input; TestCase(int id, String input) { this.id = id; this.input = input; } }
 
-        TestCase(int id, String input) {
-            this.id = id;
-            this.input = input;
-        }
-    }
-
-    /**
-     * Result of validation including PDA instruction trace.
-     */
     static class ValidationResult {
-        boolean isValid;
-        String message;
+        boolean isValid;      // syntactic validity as per JSON grammar
+        boolean accepted;     // reached EOF after successful parse
+        String finalState;
         List<Instruction> instructions;
-
-        ValidationResult(boolean isValid, String message, List<Instruction> instructions) {
-            this.isValid = isValid;
-            this.message = message;
-            this.instructions = instructions;
+        ValidationResult(boolean isValid, boolean accepted, String finalState, List<Instruction> instructions) {
+            this.isValid = isValid; this.accepted = accepted; this.finalState = finalState; this.instructions = instructions;
         }
     }
-
-
 }
-

@@ -218,23 +218,21 @@ public class JSONParser {
     }
 
     private boolean parseArray(String nextStateAfterArray) {
-        // We already pushed ARRAY in parseValue, now we expand it
-        // Production: ARRAY → '[' ELEMENTS ']'
-        // Reverse push: ']' , ELEMENTS , '['   (but we'll handle '[' separately)
-        recordInstruction(Instruction.Operation.WRITE, "RBRACKET", Q_ARRAY_OPEN);
-        recordInstruction(Instruction.Operation.WRITE, "ELEMENTS", Q_ARRAY_OPEN);
         recordInstruction(Instruction.Operation.WRITE, "LBRACKET", Q_ARRAY_OPEN);
-
-        // Now the top of stack is LBRACKET – match it
         if (!consume(Token.LBRACKET, "Expected '['", Q_ARRAY_ELEMENTS)) return false;
 
-        // Now top is ELEMENTS – expand it
+        if (tokens.current() == Token.RBRACKET) {
+            // Empty array
+            recordInstruction(Instruction.Operation.WRITE, "RBRACKET", Q_ARRAY_CLOSE);
+            tokens.advance();
+            recordInstruction(Instruction.Operation.READ, "ARRAY", nextStateAfterArray);
+            return true;
+        }
+
+        // Non-empty array: [ elements ]
         if (!parseElements(Q_ARRAY_CLOSE)) return false;
-
-        // After ELEMENTS is expanded, top becomes RBRACKET – match it
+        recordInstruction(Instruction.Operation.WRITE, "RBRACKET", Q_ARRAY_CLOSE);
         if (!consume(Token.RBRACKET, "Expected ']'", Q_ARRAY_CLOSE)) return false;
-
-        // Finally pop the ARRAY nonterminal
         recordInstruction(Instruction.Operation.READ, "ARRAY", nextStateAfterArray);
         return true;
     }
